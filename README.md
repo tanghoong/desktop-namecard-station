@@ -49,7 +49,78 @@ The original card images are the most important source of truth. Namecard Statio
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
-- A computer and a phone on the **same Wi-Fi / LAN**
+- Android phone (Chrome or Huawei Browser) on the same computer via USB
+
+### Camera Access — Option A: USB via adb (No Wi-Fi needed)
+
+Android Chrome requires HTTPS for camera access — except when the page is served from `localhost`. `adb reverse` tunnels your phone's localhost port to the laptop, so the phone treats your server as `localhost` and camera works without any certificate.
+
+**Step 1 — Enable USB Debugging on your phone:**
+Settings → About phone → tap "Build number" 7 times → Developer options → USB Debugging: ON
+
+**Step 2 — Install adb** (if you don't have it):
+Download [Android Platform Tools](https://developer.android.com/tools/releases/platform-tools) and add it to your PATH, or install via winget:
+
+```powershell
+winget install Google.PlatformTools
+```
+
+**Step 3 — Connect and reverse the port:**
+
+```bash
+adb reverse tcp:3000 tcp:3000
+```
+
+Then on your phone browser open `http://localhost:3000` — camera will work.
+
+---
+
+### Camera Access — Option B: Wi-Fi via Cloudflare Quick Tunnel (No USB needed)
+
+Cloudflare Quick Tunnel creates a temporary public HTTPS URL that tunnels to your local server. Because it's HTTPS, the phone camera works over Wi-Fi without any certificate setup.
+
+**Step 1 — Install cloudflared:**
+
+```powershell
+winget install Cloudflare.cloudflared
+```
+
+Or download the installer from the [cloudflared releases page](https://github.com/cloudflare/cloudflared/releases) — grab `cloudflared-windows-amd64.msi`.
+
+**Step 2 — Make sure your server is running first:**
+
+```bash
+# Docker:
+docker compose up -d
+
+# Or dev mode:
+npm run dev:server
+```
+
+**Step 3 — Start the tunnel:**
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+**Step 4 — Open the URL on your phone:**
+
+cloudflared will print something like:
+
+```
++--------------------------------------------------------------------------------------------+
+|  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |
+|  https://random-words-here.trycloudflare.com                                               |
++--------------------------------------------------------------------------------------------+
+```
+
+Open that `https://….trycloudflare.com` URL on your phone browser. Camera access will work.
+
+> **Notes:**
+>
+> - The URL changes every time you restart cloudflared — copy it fresh each session.
+> - The tunnel is active only while the `cloudflared` process is running. Close it when done.
+> - No Cloudflare account or login needed for Quick Tunnel.
 
 ### Run
 
@@ -59,14 +130,19 @@ cd desktop-namecard-station
 docker compose up -d
 ```
 
+### Verify Camera Detection (Before First Use)
+
+Open `http://localhost:3000/test.html` on your phone browser. This page shows a live debug overlay — brightness, motion diff, and contrast scores — so you can confirm detection thresholds work on your device before capturing real cards.
+
 ### Capture Cards
 
-1. Find your computer's LAN IP (e.g., `192.168.1.25`).
-2. On your phone browser, open `http://<LAN-IP>:3000/capture`.
+1. Connect phone via USB and run `adb reverse tcp:3000 tcp:3000`.
+2. On your phone browser, open `http://localhost:3000/capture`.
 3. Place a business card within the guide frame.
-4. The app auto-detects stability → counts down `3, 2, 1` → captures front.
-5. Flip the card → auto-captures back.
-6. Done! Images are saved in `./data/cards/`.
+4. The app continuously detects brightness, stability, and card content.
+5. When conditions are met, it auto-counts down `3, 2, 1` → captures front.
+6. Flip the card — the app detects the change and auto-captures back.
+7. Done! Images are saved in `./data/cards/`.
 
 ---
 

@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Namecard Station — Camera Test</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+    html, body {
+      width:100%; height:100%; overflow:hidden;
+      background:#000;
+      font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color:#fff;
+    }
+
+    /* ── Video ─────────────────────────────────────── */
+    #video {
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      object-fit:cover;
+    }
+
+    /* ── Guide frame ───────────────────────────────── */
+    #guide-frame {
+      position:absolute; z-index:2;
+      border:2.5px solid rgba(255,255,255,0.8);
+      border-radius:6px;
+      pointer-events:none;
+      box-shadow:0 0 0 9999px rgba(0,0,0,0.45);
+      transition:border-color .15s, box-shadow .15s;
+    }
+    #guide-frame.ready {
+      border-color:#4ade80;
+      box-shadow:0 0 0 9999px rgba(0,0,0,0.25), 0 0 0 3px rgba(74,222,128,.35);
+    }
+    #guide-frame.back-mode {
+      border-color:rgba(96,165,250,0.8);
+    }
+    #guide-frame.back-mode.ready {
+      border-color:#60a5fa;
+      box-shadow:0 0 0 9999px rgba(0,0,0,0.25), 0 0 0 3px rgba(96,165,250,.35);
+    }
+
+    /* Step badge inside guide frame */
+    #step-badge {
+      position:absolute; top:-30px; left:50%;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,.85); border-radius:20px;
+      font-size:12px; font-weight:700; letter-spacing:.5px;
+      padding:3px 12px; white-space:nowrap;
+      color:#fff;
+    }
+    #guide-hint {
+      position:absolute; bottom:-26px; left:50%;
+      transform:translateX(-50%);
+      white-space:nowrap; font-size:12px;
+      color:rgba(255,255,255,.65); text-shadow:0 1px 3px #000;
+    }
+
+    /* ── Debug panel ───────────────────────────────── */
+    #debug {
+      position:absolute; top:0; left:0; right:0; z-index:5;
+      background:rgba(0,0,0,.75); padding:9px 13px 7px;
+      font-family:'Courier New', monospace; font-size:12px;
+    }
+    .row  { display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+    .lbl  { color:#9ca3af; width:68px; flex-shrink:0; }
+    .val  { font-weight:700; width:38px; text-align:right; flex-shrink:0; }
+    .track{ flex:1; height:4px; background:#374151; border-radius:2px; overflow:hidden; }
+    .bar  { height:100%; border-radius:2px; transition:width .08s linear; }
+    .icon { width:16px; text-align:center; }
+    .sep  { border:none; border-top:1px solid rgba(255,255,255,.1); margin:4px 0; }
+    .foot { display:flex; justify-content:space-between; align-items:center; }
+    .cam  { font-size:10px; color:#6b7280; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .stbl { font-size:11px; color:#9ca3af; }
+    #overall { font-size:13px; font-weight:700; }
+    .note { font-size:10px; color:#4b5563; margin-top:2px; }
+    .pass { color:#4ade80; }
+    .fail { color:#f87171; }
+    .info { color:#60a5fa; }
+
+    /* ── Status text ───────────────────────────────── */
+    #status {
+      position:absolute; bottom:86px; left:16px; right:16px; z-index:5;
+      text-align:center; font-size:14px; font-weight:600;
+      text-shadow:0 1px 6px rgba(0,0,0,.9); line-height:1.4;
+    }
+
+    /* ── Countdown ─────────────────────────────────── */
+    #cd {
+      position:absolute; inset:0; z-index:6; pointer-events:none;
+      display:none; align-items:center; justify-content:center;
+      font-size:120px; font-weight:900;
+      text-shadow:0 2px 24px rgba(0,0,0,.8);
+    }
+    #cd.show { display:flex; }
+
+    /* ── Flip prompt overlay ───────────────────────── */
+    #flip-prompt {
+      position:absolute; inset:0; z-index:7;
+      background:rgba(0,0,0,.72);
+      display:none; flex-direction:column;
+      align-items:center; justify-content:center; gap:16px;
+      padding:32px;
+    }
+    #flip-prompt.show { display:flex; }
+    #flip-icon  { font-size:56px; }
+    #flip-title { font-size:22px; font-weight:700; text-align:center; }
+    #flip-sub   { font-size:13px; color:#9ca3af; text-align:center; line-height:1.6; }
+    #btnFlipDone {
+      margin-top:8px; padding:14px 32px;
+      background:#60a5fa; color:#000;
+      border:none; border-radius:10px;
+      font-size:16px; font-weight:700; cursor:pointer;
+    }
+    #btnFlipDone:active { opacity:.75; }
+
+    /* ── Controls ──────────────────────────────────── */
+    #ctrl {
+      position:absolute; bottom:0; left:0; right:0; z-index:5;
+      display:flex; gap:10px; padding:12px 14px 18px;
+      background:rgba(0,0,0,.65);
+    }
+    button {
+      flex:1; padding:13px 8px; border:none; border-radius:10px;
+      font-size:15px; font-weight:600; cursor:pointer;
+    }
+    button:active { opacity:.72; }
+    #btnCapture { background:#22c55e; color:#000; }
+    #btnRetry   { background:rgba(255,255,255,.14); color:#fff; }
+
+    /* ── Result view ───────────────────────────────── */
+    #resultView {
+      position:absolute; inset:0; z-index:10;
+      background:#0f172a; display:none;
+      flex-direction:column; padding:16px; overflow-y:auto; gap:12px;
+    }
+    #resultView.show { display:flex; }
+    #resultTitle {
+      font-size:17px; font-weight:700; color:#4ade80;
+      text-align:center; padding-bottom:4px;
+    }
+    .img-pair { display:flex; gap:10px; }
+    .img-card { flex:1; display:flex; flex-direction:column; gap:6px; }
+    .img-label {
+      font-size:11px; font-weight:700; text-align:center;
+      letter-spacing:.5px; color:#94a3b8;
+    }
+    .img-card img {
+      width:100%; border-radius:6px;
+      border:1px solid #1e3a5f;
+    }
+    #resultMeta {
+      padding:11px 13px; background:#1e293b;
+      border-radius:8px; font-size:12px;
+      font-family:'Courier New', monospace;
+      color:#94a3b8; line-height:2;
+    }
+    #resultMeta b { color:#e2e8f0; }
+    .badge { background:#166534; color:#4ade80; padding:1px 8px; border-radius:20px; font-size:11px; font-weight:700; }
+    #btnBack {
+      padding:13px; background:rgba(255,255,255,.08);
+      color:#fff; border:1px solid rgba(255,255,255,.15);
+      border-radius:10px; font-size:15px; font-weight:600; cursor:pointer;
+    }
+    #btnBack:active { opacity:.72; }
+  </style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline muted></video>
+
+<div id="guide-frame">
+  <span id="step-badge">FRONT 1/2</span>
+  <span id="guide-hint">Place card here</span>
+</div>
+
+<div id="debug">
+  <div class="row">
+    <span class="lbl">Brightness</span>
+    <span class="val" id="vB">--</span>
+    <div class="track"><div class="bar" id="bB" style="width:0%;background:#fbbf24"></div></div>
+    <span class="icon" id="iB">·</span>
+  </div>
+  <div class="row">
+    <span class="lbl">Motion</span>
+    <span class="val" id="vM">--</span>
+    <div class="track"><div class="bar" id="bM" style="width:0%;background:#60a5fa"></div></div>
+    <span class="icon" id="iM">·</span>
+  </div>
+  <div class="row">
+    <span class="lbl">Contrast</span>
+    <span class="val" id="vC">--</span>
+    <div class="track"><div class="bar" id="bC" style="width:0%;background:#c084fc"></div></div>
+    <span class="icon" id="iC">·</span>
+  </div>
+  <div class="row">
+    <span class="lbl">Edges</span>
+    <span class="val" id="vE">--</span>
+    <div class="track"><div class="bar" id="bE" style="width:0%;background:#fb923c"></div></div>
+    <span class="icon" id="iE">·</span>
+  </div>
+  <hr class="sep">
+  <div class="foot">
+    <span id="camInfo" class="cam">camera not started</span>
+    <span id="stableInfo" class="stbl">stable 0/5</span>
+    <span id="overall" class="fail">NOT READY</span>
+  </div>
+  <div class="note">B:40–230 &nbsp;·&nbsp; M:&lt;12 &nbsp;·&nbsp; C:&gt;20 &nbsp;·&nbsp; E:&gt;4%</div>
+</div>
+
+<div id="status">Starting camera…</div>
+
+<div id="cd"><span id="cdNum"></span></div>
+
+<!-- Flip card prompt -->
+<div id="flip-prompt">
+  <div id="flip-icon">↩</div>
+  <div id="flip-title">Front saved — flip the card</div>
+  <div id="flip-sub">Hold the back side in the frame.<br>Auto-detecting… or tap when ready.</div>
+  <button id="btnFlipDone" onclick="confirmFlip()">Back Side Ready</button>
+</div>
+
+<div id="ctrl">
+  <button id="btnCapture" onclick="manualCapture()">Capture Now</button>
+  <button id="btnRetry"   onclick="startCamera()">Retry Camera</button>
+</div>
+
+<!-- Result view: both images side by side -->
+<div id="resultView">
+  <div id="resultTitle">Card Captured</div>
+  <div class="img-pair">
+    <div class="img-card">
+      <div class="img-label">FRONT</div>
+      <img id="imgFront" src="" alt="Front">
+    </div>
+    <div class="img-card">
+      <div class="img-label">BACK</div>
+      <img id="imgBack" src="" alt="Back">
+    </div>
+  </div>
+  <div id="resultMeta"></div>
+  <button id="btnBack" onclick="resetAll()">Capture Another Card</button>
+</div>
+
+<canvas id="smplCnv" width="160" height="120" style="display:none"></canvas>
+<canvas id="cropCnv" style="display:none"></canvas>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════
+const CFG = {
+  sampleW:        160,
+  sampleH:        120,
+  tick:           100,   // ms per sample
+  bMin:            40,   // brightness floor
+  bMax:           230,   // brightness ceiling
+  mThresh:         12,   // motion: mean pixel diff
+  cThresh:         20,   // contrast: luminance std-dev
+  eThresh:       0.04,   // edge density: fraction of edge pixels (4%)
+  stableNeeded:     5,   // frames that must all pass → ~500ms
+  cdFrom:           1,   // countdown start (1 second)
+  flipSpike:       45,   // motion diff spike that signals a card flip
+  flipSettle:       4,   // stable frames after spike to confirm flip
+};
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+// Phases:
+//   detecting_front → countdown_front → flip_wait
+//   → detecting_back → countdown_back → result
+let phase     = 'init';
+let stream    = null;
+let loop      = null;
+let cdTick    = null;
+let prev      = null;
+let stable    = 0;
+let cdVal     = 0;
+let flipSeen  = false;   // motion spike detected during flip_wait
+let flipSettle = 0;      // frames settled after spike
+
+let frontBlob = null;
+let backBlob  = null;
+let frontInfo = {};
+let backInfo  = {};
+
+// ═══════════════════════════════════════════════════════
+// DOM
+// ═══════════════════════════════════════════════════════
+const video     = document.getElementById('video');
+const gf        = document.getElementById('guide-frame');
+const stepBadge = document.getElementById('step-badge');
+const guideHint = document.getElementById('guide-hint');
+const cdEl      = document.getElementById('cd');
+const cdNum     = document.getElementById('cdNum');
+const stat      = document.getElementById('status');
+const flipPr    = document.getElementById('flip-prompt');
+const rv        = document.getElementById('resultView');
+const rm        = document.getElementById('resultMeta');
+
+const smplCnv = document.getElementById('smplCnv');
+const sCtx    = smplCnv.getContext('2d');
+const cropCnv = document.getElementById('cropCnv');
+const cCtx    = cropCnv.getContext('2d');
+
+// ═══════════════════════════════════════════════════════
+// GUIDE FRAME LAYOUT
+// ═══════════════════════════════════════════════════════
+function layoutGF() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const fw = Math.min(vw * 0.85, 360);
+  const fh = fw / 1.585;
+  gf.style.width  = fw + 'px';
+  gf.style.height = fh + 'px';
+  gf.style.left   = ((vw - fw) / 2) + 'px';
+  gf.style.top    = ((vh - fh) / 2) + 'px';
+}
+window.addEventListener('resize', layoutGF);
+window.addEventListener('orientationchange', layoutGF);
+layoutGF();
+
+// ═══════════════════════════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════════════════════════
+async function startCamera() {
+  stopAll();
+  setStatus('Requesting camera access…');
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  flipPr.classList.remove('show');
+  rv.classList.remove('show');
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    const s = stream.getVideoTracks()[0].getSettings();
+    document.getElementById('camInfo').textContent =
+      (s.facingMode || '?') + ' · ' + (s.width || video.videoWidth) + '×' + (s.height || video.videoHeight);
+
+    enterPhase('detecting_front');
+    loop = setInterval(tick, CFG.tick);
+
+  } catch (e) {
+    const msgs = {
+      NotAllowedError:  'Camera access denied — enable in browser settings',
+      NotFoundError:    'No camera found on this device',
+      NotReadableError: 'Camera in use by another app',
+    };
+    setStatus('Error: ' + (msgs[e.name] || e.message));
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// MAIN ANALYSIS TICK
+// ═══════════════════════════════════════════════════════
+function tick() {
+  if (!video.videoWidth) return;
+
+  // Always sample for motion (used across phases)
+  sCtx.drawImage(video, 0, 0, CFG.sampleW, CFG.sampleH);
+  const fd = sCtx.getImageData(0, 0, CFG.sampleW, CFG.sampleH).data;
+  const M  = prev ? calcMotion(fd, prev) : 999;
+  prev = fd.slice();
+
+  // ── Flip wait: watch for motion spike then settle ──
+  if (phase === 'flip_wait') {
+    if (M > CFG.flipSpike) {
+      flipSeen   = true;
+      flipSettle = 0;
+    }
+    if (flipSeen) {
+      if (M < CFG.mThresh) {
+        flipSettle++;
+        if (flipSettle >= CFG.flipSettle) {
+          enterPhase('detecting_back');
+          setStatus('Back side — place it in the frame');
+        }
+      } else {
+        flipSettle = 0;
+      }
+    }
+    // Update motion display during flip wait
+    setBar('bM', (M / 50) * 100);
+    setValue('vM', M.toFixed(1));
+    return;
+  }
+
+  // ── Detection phases ──
+  if (phase !== 'detecting_front' && phase !== 'detecting_back' &&
+      phase !== 'countdown_front'  && phase !== 'countdown_back') return;
+
+  // Sample guide-frame region for contrast + edge density
+  const gv = guideToVideoCoords();
+  cropCnv.width  = 80;
+  cropCnv.height = Math.round(80 / 1.585);
+  cCtx.drawImage(video, gv.sx, gv.sy, gv.sw, gv.sh, 0, 0, cropCnv.width, cropCnv.height);
+  const gd = cCtx.getImageData(0, 0, cropCnv.width, cropCnv.height).data;
+
+  const B  = calcBrightness(fd);
+  const C  = calcContrast(gd);
+  const E  = calcEdgeDensity(gd, cropCnv.width, cropCnv.height);
+
+  const bOk = B >= CFG.bMin && B <= CFG.bMax;
+  const mOk = M < CFG.mThresh;
+  const cOk = C > CFG.cThresh;
+  const eOk = E > CFG.eThresh;
+  const ok  = bOk && mOk && cOk && eOk;
+
+  updateHUD(B, M, C, E, bOk, mOk, cOk, eOk, ok);
+
+  // ── Countdown interrupt check ──
+  if (phase === 'countdown_front' || phase === 'countdown_back') {
+    if (!mOk) cancelCountdown('Movement — hold still to restart');
+    return;
+  }
+
+  // ── Stable accumulation ──
+  stable = ok ? stable + 1 : 0;
+  document.getElementById('stableInfo').textContent = 'stable ' + stable + '/' + CFG.stableNeeded;
+  gf.classList.toggle('ready', ok);
+
+  if (stable >= CFG.stableNeeded) {
+    beginCountdown();
+  } else {
+    setStatus(ok ? 'Hold still…' : statusHint(B, M, bOk, mOk, cOk, eOk));
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// COORDINATE MAPPING  (guide frame CSS → video pixels)
+// ═══════════════════════════════════════════════════════
+function guideToVideoCoords() {
+  const dw = video.clientWidth  || window.innerWidth;
+  const dh = video.clientHeight || window.innerHeight;
+  const nw = video.videoWidth, nh = video.videoHeight;
+  if (!nw || !nh) return { sx:0, sy:0, sw:640, sh:480 };
+
+  const scale = Math.max(dw / nw, dh / nh);
+  const cropX = (nw * scale - dw) / 2 / scale;
+  const cropY = (nh * scale - dh) / 2 / scale;
+
+  const fl = parseFloat(gf.style.left),  ft = parseFloat(gf.style.top);
+  const fw = parseFloat(gf.style.width), fh = parseFloat(gf.style.height);
+
+  return { sx: cropX + fl/scale, sy: cropY + ft/scale, sw: fw/scale, sh: fh/scale };
+}
+
+// ═══════════════════════════════════════════════════════
+// DETECTION ALGORITHMS
+// ═══════════════════════════════════════════════════════
+function calcBrightness(d) {
+  let s = 0, n = d.length >> 2;
+  for (let i = 0; i < d.length; i += 4) s += (d[i] + d[i+1] + d[i+2]) / 3;
+  return s / n;
+}
+
+function calcMotion(a, b) {
+  let s = 0, n = a.length >> 2;
+  for (let i = 0; i < a.length; i += 4) {
+    s += Math.abs(a[i]-b[i]) + Math.abs(a[i+1]-b[i+1]) + Math.abs(a[i+2]-b[i+2]);
+  }
+  return s / (n * 3);
+}
+
+function calcContrast(d) {
+  const n = d.length >> 2;
+  const L = new Float32Array(n);
+  let sum = 0;
+  for (let i=0,j=0; i<d.length; i+=4,j++) {
+    L[j] = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    sum += L[j];
+  }
+  const mean = sum / n;
+  let v = 0;
+  for (let j=0; j<n; j++) v += (L[j]-mean)**2;
+  return Math.sqrt(v / n);
+}
+
+function calcEdgeDensity(d, w, h) {
+  // Simple horizontal + vertical gradient magnitude.
+  // Cards with text/logos produce many edges; plain backgrounds produce few.
+  let edges = 0;
+  const total = (w - 1) * (h - 1);
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w - 1; x++) {
+      const i  = (y * w + x) * 4;
+      const ir = (y * w + x + 1) * 4;       // right
+      const id = ((y + 1) * w + x) * 4;     // down
+      const lum  = v => 0.299*d[v] + 0.587*d[v+1] + 0.114*d[v+2];
+      const gx = Math.abs(lum(i) - lum(ir));
+      const gy = Math.abs(lum(i) - lum(id));
+      if (gx + gy > 20) edges++;
+    }
+  }
+  return edges / total;
+}
+
+// ═══════════════════════════════════════════════════════
+// COUNTDOWN
+// ═══════════════════════════════════════════════════════
+function beginCountdown() {
+  const cdPhase = phase === 'detecting_front' ? 'countdown_front' : 'countdown_back';
+  phase  = cdPhase;
+  cdVal  = CFG.cdFrom;
+  cdNum.textContent = cdVal;
+  cdEl.classList.add('show');
+  setStatus('Keep steady…');
+
+  cdTick = setInterval(() => {
+    cdVal--;
+    if (cdVal <= 0) {
+      clearInterval(cdTick); cdTick = null;
+      doCapture();
+    } else {
+      cdNum.textContent = cdVal;
+    }
+  }, 1000);
+}
+
+function cancelCountdown(msg) {
+  if (cdTick) { clearInterval(cdTick); cdTick = null; }
+  cdEl.classList.remove('show');
+  stable = 0;
+  gf.classList.remove('ready');
+  document.getElementById('stableInfo').textContent = 'stable 0/' + CFG.stableNeeded;
+  phase = phase === 'countdown_front' ? 'detecting_front' : 'detecting_back';
+  setStatus(msg || 'Place card in frame');
+}
+
+// ═══════════════════════════════════════════════════════
+// CAPTURE
+// ═══════════════════════════════════════════════════════
+function doCapture() {
+  cdEl.classList.remove('show');
+  const isFront = phase === 'countdown_front';
+
+  const gv = guideToVideoCoords();
+  const ow = Math.round(gv.sw), oh = Math.round(gv.sh);
+  const cap = document.createElement('canvas');
+  cap.width = ow; cap.height = oh;
+  cap.getContext('2d').drawImage(video, gv.sx, gv.sy, gv.sw, gv.sh, 0, 0, ow, oh);
+
+  cap.toBlob((blob) => {
+    if (!blob) {
+      setStatus('Capture failed — try again');
+      phase = isFront ? 'detecting_front' : 'detecting_back';
+      return;
+    }
+    if (isFront) {
+      frontBlob = blob;
+      frontInfo = { w: ow, h: oh, kb: (blob.size/1024).toFixed(1) };
+      document.getElementById('imgFront').src = URL.createObjectURL(blob);
+      enterFlipWait();
+    } else {
+      backBlob = blob;
+      backInfo = { w: ow, h: oh, kb: (blob.size/1024).toFixed(1) };
+      document.getElementById('imgBack').src = URL.createObjectURL(blob);
+      showResult();
+    }
+  }, 'image/jpeg', 0.88);
+}
+
+function manualCapture() {
+  if (!stream || !video.videoWidth) { setStatus('Start the camera first'); return; }
+  if (phase === 'flip_wait') { confirmFlip(); return; }
+  if (phase === 'detecting_front') phase = 'countdown_front';
+  else if (phase === 'detecting_back') phase = 'countdown_back';
+  if (cdTick) { clearInterval(cdTick); cdTick = null; }
+  cdEl.classList.remove('show');
+  doCapture();
+}
+
+// ═══════════════════════════════════════════════════════
+// FLIP WAIT
+// ═══════════════════════════════════════════════════════
+function enterFlipWait() {
+  phase      = 'flip_wait';
+  flipSeen   = false;
+  flipSettle = 0;
+  prev       = null;   // reset motion baseline after capture
+  flipPr.classList.add('show');
+  setStatus('Front saved — flip the card');
+}
+
+function confirmFlip() {
+  flipPr.classList.remove('show');
+  enterPhase('detecting_back');
+  setStatus('Back side — place it in the frame');
+}
+
+// ═══════════════════════════════════════════════════════
+// PHASE TRANSITIONS
+// ═══════════════════════════════════════════════════════
+function enterPhase(p) {
+  phase  = p;
+  stable = 0;
+  document.getElementById('stableInfo').textContent = 'stable 0/' + CFG.stableNeeded;
+  gf.classList.remove('ready');
+
+  const isFront = p === 'detecting_front';
+  gf.classList.toggle('back-mode', !isFront);
+  stepBadge.textContent    = isFront ? 'FRONT  1/2' : 'BACK  2/2';
+  guideHint.textContent    = isFront ? 'Place card FRONT' : 'Place card BACK';
+  stepBadge.style.color    = isFront ? '#fff' : '#93c5fd';
+
+  document.getElementById('overall').textContent = 'NOT READY';
+  document.getElementById('overall').className   = 'fail';
+  setStatus(isFront ? 'Camera ready — place FRONT of card in frame' : 'Now place BACK of card in frame');
+}
+
+// ═══════════════════════════════════════════════════════
+// RESULT
+// ═══════════════════════════════════════════════════════
+function showResult() {
+  stopAll();
+  rm.innerHTML =
+    '<b>Front:</b> ' + frontInfo.w + '×' + frontInfo.h + ' px — ' + frontInfo.kb + ' KB<br>' +
+    '<b>Back :</b> ' + backInfo.w  + '×' + backInfo.h  + ' px — ' + backInfo.kb  + ' KB<br>' +
+    '<b>Camera:</b> ' + video.videoWidth + '×' + video.videoHeight + ' px<br>' +
+    '<b>Result:</b> <span class="badge">PASS — front + back set complete</span>';
+  rv.classList.add('show');
+}
+
+function resetAll() {
+  rv.classList.remove('show');
+  flipPr.classList.remove('show');
+  frontBlob = backBlob = null;
+  frontInfo = backInfo = {};
+  prev = null;
+  enterPhase('detecting_front');
+  if (!loop) loop = setInterval(tick, CFG.tick);
+}
+
+// ═══════════════════════════════════════════════════════
+// HUD
+// ═══════════════════════════════════════════════════════
+function updateHUD(B, M, C, E, bOk, mOk, cOk, eOk, ok) {
+  setValue('vB', B.toFixed(0)); setBar('bB', (B/255)*100);   setIcon('iB', bOk);
+  setValue('vM', M.toFixed(1)); setBar('bM', (M/50)*100);    setIcon('iM', mOk);
+  setValue('vC', C.toFixed(1)); setBar('bC', (C/80)*100);    setIcon('iC', cOk);
+  setValue('vE', (E*100).toFixed(1)+'%'); setBar('bE', (E/0.2)*100); setIcon('iE', eOk);
+
+  const ov = document.getElementById('overall');
+  ov.textContent = ok ? 'READY' : 'NOT READY';
+  ov.className   = ok ? 'pass'  : 'fail';
+}
+function setValue(id, v) { document.getElementById(id).textContent = v; }
+function setBar(id, pct) { document.getElementById(id).style.width = Math.min(100, pct) + '%'; }
+function setIcon(id, pass) {
+  const el = document.getElementById(id);
+  el.textContent = pass ? '✓' : '✗';
+  el.className   = 'icon ' + (pass ? 'pass' : 'fail');
+}
+
+// ═══════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════
+function statusHint(B, M, bOk, mOk, cOk, eOk) {
+  if (!bOk) return B < CFG.bMin ? 'Too dark — add more light' : 'Too bright — reduce light';
+  if (!mOk) return 'Too much movement — hold still';
+  if (!cOk) return 'Low contrast — ensure card is in frame';
+  if (!eOk) return 'No card detected — point camera at card';
+  return 'Analysing…';
+}
+function setStatus(msg) { stat.textContent = msg; }
+function stopAll() {
+  if (loop)   { clearInterval(loop);   loop   = null; }
+  if (cdTick) { clearInterval(cdTick); cdTick = null; }
+}
+
+// ═══════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════
+startCamera();
+</script>
+</body>
+</html>

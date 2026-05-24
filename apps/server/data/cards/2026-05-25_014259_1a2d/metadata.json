@@ -1,0 +1,19 @@
+{
+  "id": "2026-05-25_014259_1a2d",
+  "created_at": "2026-05-24T17:42:59.351Z",
+  "updated_at": "2026-05-24T17:43:20.233Z",
+  "source": "mobile-web-camera",
+  "capture_mode": "auto-front-back",
+  "app_version": "0.1.0",
+  "device": {
+    "user_agent": "Mozilla/5.0 (Linux; Android 12; NAM-LX9; HMSCore 6.15.6.332) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.196 HuaweiBrowser/17.0.4.302 Mobile Safari/537.36",
+    "screen_width": 0,
+    "screen_height": 0
+  },
+  "files": {
+    "front": "front.jpg",
+    "back": "back.jpg"
+  },
+  "tags": [],
+  "notes": ""
+}

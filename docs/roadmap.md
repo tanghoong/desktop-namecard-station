@@ -4,12 +4,46 @@
 
 ---
 
+## Pre-Development — Camera Detection Test Page
+
+**Goal:** Validate that the phone camera and frame-analysis algorithms work on the actual device before writing any React or Fastify code.
+
+Build a single standalone HTML file (`/test` route or `public/test.html`) — no framework, no build step. It should:
+
+- Open camera via `getUserMedia` and display live preview
+- Sample frames every 100ms and compute all three checks
+- Show a real-time debug overlay:
+  - Current brightness value + pass/fail
+  - Current motion diff value + pass/fail
+  - Current contrast value + pass/fail
+  - Overall: READY / NOT READY
+- Show a manual "Capture Now" button to test JPEG blob creation and display
+- Show the canvas crop of the guide-frame region
+
+**Pass criteria to proceed to full development:**
+
+1. Camera opens on Android Chrome via `adb reverse` at `http://localhost:3000/test`
+2. Holding a still business card for 1–2 seconds shows READY in the overlay
+3. Moving the card resets to NOT READY
+4. Manual capture produces a visible JPEG crop
+
+This test page stays in the repo as a diagnostic tool.
+
+### GitHub Issue
+
+| # | Issue                      | Description                                                                                |
+|---|----------------------------|--------------------------------------------------------------------------------------------|
+| 0 | Camera Detection Test Page | Standalone HTML test harness - camera access, frame analysis debug overlay, manual capture |
+
+---
+
 ## MVP 0 — Core Capture (Current)
 
 **Goal:** Reliably capture front & back images of a business card and save them to disk.
 
 ### Features
 
+- [ ] Camera detection test page passes on Android device
 - [ ] Docker Compose local server on port 3000
 - [ ] `/capture` page with mobile camera preview
 - [ ] Fixed business card guide frame overlay

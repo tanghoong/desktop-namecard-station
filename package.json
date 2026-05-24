@@ -1,0 +1,13 @@
+{
+  "name": "namecard-station",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=apps/server",
+    "dev:web":    "npm run dev --workspace=apps/web",
+    "build":      "npm run build --workspace=apps/web && npm run build --workspace=apps/server",
+    "start":      "node apps/server/dist/index.js",
+    "serve":      "npm run build --workspace=apps/web && npm run dev:server"
+  },
+  "engines": { "node": ">=20" }
+}

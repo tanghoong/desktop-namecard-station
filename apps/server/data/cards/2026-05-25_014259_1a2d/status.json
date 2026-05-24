@@ -1,0 +1,10 @@
+{
+  "capture": "done",
+  "front": "done",
+  "back": "done",
+  "ocr": "pending",
+  "ai_parse": "pending",
+  "review": "pending",
+  "export": "pending",
+  "errors": []
+}

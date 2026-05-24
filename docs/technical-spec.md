@@ -50,7 +50,7 @@ Namecard Station is a local-first, Dockerized web application that lets a phone 
 | Language | TypeScript | Type safety for state machine and API contracts |
 | Bundler | Vite | Fast dev server, good PWA support |
 | Styling | CSS Modules or Tailwind | Keep it simple for MVP |
-| Camera API | `getUserMedia` / MediaDevices | Standard web API, works on mobile browsers |
+| Camera API | `getUserMedia` / MediaDevices | Standard web API, works on mobile browsers — request rear camera + high resolution |
 | HTTP Client | `fetch` or `ky` | Lightweight |
 | PWA | Optional for MVP | Install prompt for better mobile UX |
 
@@ -227,7 +227,7 @@ type CaptureState =
 | `countdown_front` | `capturing_front` | Countdown completed |
 | `capturing_front` | `uploading_front` | Frame extracted from canvas |
 | `uploading_front` | `waiting_back` | `POST /api/cards/:id/front` success |
-| `waiting_back` | `detecting_back` | User flips card (stability + content change) |
+| `waiting_back` | `detecting_back` | Auto: frame analysis resumes immediately; content-change threshold crossed after flip |
 | `detecting_back` | `countdown_back` | Stability + brightness + content OK |
 | `countdown_back` | `detecting_back` | Motion detected during countdown |
 | `countdown_back` | `capturing_back` | Countdown completed |
@@ -239,7 +239,9 @@ type CaptureState =
 
 ## 6. Auto-Capture Detection
 
-Three checks run continuously at ~100ms intervals:
+Detection runs as a **continuous loop** at ~100ms intervals from the moment the camera stream is ready — similar to how face-detection UIs work. There is no manual trigger for any transition except the initial "Start Capture" button. The system watches the frame at all times and advances the state machine automatically when conditions are met.
+
+Four checks run on every frame sample:
 
 ### 6.1 Brightness Check
 
@@ -251,26 +253,81 @@ Three checks run continuously at ~100ms intervals:
 
 - Compare current frame vs previous frame pixel difference.
 - Use downscaled frames for performance.
-- Threshold: mean pixel difference < 8–15.
-- Must remain stable for 8–12 consecutive samples (~800–1200ms).
+- Threshold: mean pixel difference `< 12`.
+- Must remain stable for **5 consecutive samples (~500ms)**. *(Confirmed via device testing: 8–12 was too slow for handheld capture.)*
 
 ### 6.3 Center Content Check
 
 - Extract the guide-frame region from the frame.
 - Compute contrast (standard deviation of luminance).
-- Threshold: contrast above a configurable minimum.
+- Threshold: `contrast > 20`.
 - Prevents capturing empty desks or blurred frames.
+
+### 6.4 Edge Density Check
+
+- Extract the guide-frame region (downscaled to 80×50).
+- Compute horizontal + vertical gradient magnitude per pixel: `|lum(x) - lum(x+1)| + |lum(y) - lum(y+1)|`.
+- Count fraction of pixels where gradient > 20.
+- Threshold: **edge density > 4%**.
+- Purpose: a plain desk or wall has 1–2% edge pixels; a business card with text/logos has 8–15%. Prevents triggering on background surfaces.
+
+```typescript
+function calcEdgeDensity(d: Uint8ClampedArray, w: number, h: number): number {
+  let edges = 0;
+  const total = (w - 1) * (h - 1);
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w - 1; x++) {
+      const i  = (y * w + x) * 4;
+      const ir = (y * w + x + 1) * 4;
+      const id = ((y + 1) * w + x) * 4;
+      const lum = (v: number) => 0.299*d[v] + 0.587*d[v+1] + 0.114*d[v+2];
+      if (Math.abs(lum(i) - lum(ir)) + Math.abs(lum(i) - lum(id)) > 20) edges++;
+    }
+  }
+  return edges / total;
+}
+```
+
+### 6.5 Flip Detection (waiting_back → detecting_back)
+
+After the front image uploads, the system stays in `waiting_back` and continues sampling frames. It automatically transitions to `detecting_back` when:
+
+1. **Motion spike**: mean pixel diff > **45** — card is being picked up and flipped.
+2. **Settled**: motion diff drops back below stability threshold for **4 consecutive frames** (~400ms).
+
+A manual "Back Side Ready" button is also shown as fallback. The UI shows "Flip the card — auto-detecting…" during `waiting_back`.
 
 ---
 
-## 7. Guide Frame & Cropping
+## 7. Camera Constraints
+
+Request the rear camera at high resolution. Business cards have small text — resolution matters for later OCR.
+
+```typescript
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: {
+    facingMode: { exact: 'environment' }, // rear camera only
+    width:  { ideal: 1920 },
+    height: { ideal: 1080 },
+  },
+  audio: false,
+});
+```
+
+> `{ exact: 'environment' }` rejects if no rear camera. Use `{ ideal: 'environment' }` as fallback if you want desktop testing to still work (front camera will be used instead).
+
+Attach to `<video>` with `autoplay playsinline muted`. `playsinline` is required on Android to prevent full-screen takeover.
+
+---
+
+## 8. Guide Frame & Cropping
 
 ```
 ┌──────────────────────────────┐
 │                              │
 │   ┌────────────────────┐     │
 │   │                    │     │
-│   │   Place card here  │     │  ← Guide frame (aspect ratio ~1.6:1)
+│   │   Place card here  │     │  ← Guide frame (aspect ratio ~1.585:1)
 │   │                    │     │
 │   └────────────────────┘     │
 │                              │
@@ -278,14 +335,46 @@ Three checks run continuously at ~100ms intervals:
 └──────────────────────────────┘
 ```
 
-- Fixed guide frame in the viewport center.
-- Aspect ratio approximates standard business card (≈ 1.6:1, i.e., ~90×55mm).
-- Cropping is done on the phone using `<canvas>` before upload.
-- Both cropped and original frames saved (if MVP resources allow).
+### Frame Dimensions (CSS)
+
+Standard business card is 85.6 × 54mm (ratio 1.585:1). On a phone held portrait:
+
+```
+frameWidth  = min(viewport.width * 0.85, 360px)
+frameHeight = frameWidth / 1.585
+```
+
+Position the frame horizontally and vertically centered in the viewport.
+
+### Canvas Coordinate Scaling
+
+The `<video>` element is displayed smaller than the actual camera resolution. When cropping, you must map CSS pixel coordinates to actual video pixel coordinates:
+
+```typescript
+const scaleX = video.videoWidth  / video.clientWidth;
+const scaleY = video.videoHeight / video.clientHeight;
+
+const sx = guideFrame.offsetLeft   * scaleX;
+const sy = guideFrame.offsetTop    * scaleY;
+const sw = guideFrame.clientWidth  * scaleX;
+const sh = guideFrame.clientHeight * scaleY;
+
+ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+```
+
+### Capture Format
+
+Always encode as JPEG before upload. PNG from canvas is 3–5× larger and unnecessary for photos:
+
+```typescript
+canvas.toBlob((blob) => { /* upload blob */ }, 'image/jpeg', 0.88);
+```
+
+Quality `0.88` preserves text readability for OCR without excessive file size.
 
 ---
 
-## 8. Error Handling
+## 9. Error Handling
 
 ### Phone-Side Errors
 
@@ -311,21 +400,47 @@ Three checks run continuously at ~100ms intervals:
 
 ---
 
-## 9. Security Considerations
+## 10. Security Considerations
 
 - **LAN-only by default**: Server listens on `0.0.0.0:3000` for LAN access but is not exposed to the internet.
 - **No authentication in MVP**: The app is designed for single-user, trusted LAN environments.
 - **File size limits**: Max upload size of 20MB per image.
 - **Allowed MIME types**: `image/jpeg`, `image/png`, `image/webp`.
 - **Path traversal protection**: `cardId` validated to prevent directory traversal.
-- **Camera requires secure context**: On some browsers, `getUserMedia` requires HTTPS. Documented workarounds:
-  - Use `localhost` for desktop testing.
-  - Android Chrome allows LAN HTTP camera access.
-  - For iOS Safari, consider `mkcert` or a reverse proxy with HTTPS.
+
+### Camera Access
+
+Android Chrome and Huawei Browser both require a **secure context** (`https://` or `localhost`) for `getUserMedia`. A plain `http://192.168.x.x` LAN URL will block camera access.
+
+#### Option A — `adb reverse` (Recommended for personal use, no cert needed)
+
+Connect phone via USB with Developer Mode enabled:
+
+```bash
+adb reverse tcp:3000 tcp:3000
+```
+
+The phone then accesses `http://localhost:3000` — which is a secure context by browser definition. No certificate, no nginx. Works with Android Chrome and Huawei Browser.
+
+Requirements: ADB installed ([Android Platform Tools](https://developer.android.com/tools/releases/platform-tools)), USB cable, Developer Mode on phone.
+
+#### Option B — `mkcert` local HTTPS (Wi-Fi access without USB)
+
+```bash
+# Install mkcert, then:
+mkcert -install
+mkcert 192.168.1.25  # use your actual LAN IP
+```
+
+Configure Fastify to use the generated cert, or add an nginx sidecar in `docker-compose.yml`. Phone must trust the local CA (copy `rootCA.pem` to phone and install).
+
+#### Scope
+
+iOS Safari support is out of scope — this tool targets Android Chrome and Huawei Browser only.
 
 ---
 
-## 10. Docker Configuration
+## 11. Docker Configuration
 
 ### `Dockerfile`
 
@@ -343,8 +458,8 @@ FROM node:20-alpine AS production
 WORKDIR /app
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
-COPY --from=build /app/node_modules ./node_modules
-COPY package*.json ./
+COPY package*.json apps/server/package*.json ./
+RUN npm ci --omit=dev
 EXPOSE 3000
 CMD ["node", "apps/server/dist/index.js"]
 ```
@@ -369,7 +484,30 @@ services:
 
 ---
 
-## 11. Development Workflow
+## 12. Development Workflow
+
+### Phase 0 — Test Page Only (no Node.js, no Docker)
+
+Serve the standalone test page with any static file server. The test page is pure HTML/JS with no build step:
+
+```bash
+# Option A: Python (always available)
+python -m http.server 3000
+
+# Option B: Node.js one-liner
+npx serve -p 3000 .
+
+# Option C: VS Code Live Server extension pointing to port 3000
+```
+
+Then on your Android phone (USB connected):
+
+```bash
+adb reverse tcp:3000 tcp:3000
+# Open http://localhost:3000/test on phone browser
+```
+
+### Phase 1+ — Full Stack
 
 ```bash
 # Install dependencies
@@ -378,7 +516,7 @@ npm install
 # Start backend dev server
 cd apps/server && npm run dev
 
-# Start frontend dev server
+# Start frontend dev server (separate terminal)
 cd apps/web && npm run dev
 
 # Build for production
@@ -390,7 +528,7 @@ docker compose up -d --build
 
 ---
 
-## 12. Testing Strategy
+## 13. Testing Strategy
 
 | Layer | Approach |
 |-------|----------|
@@ -403,12 +541,12 @@ docker compose up -d --build
 
 ---
 
-## 13. Performance Targets
+## 14. Performance Targets
 
 | Metric | Target |
 |--------|--------|
 | Frame analysis interval | 100ms |
-| Stability detection window | 800–1200ms |
+| Stability detection window | ~500ms (5 frames × 100ms) |
 | Image upload time (Wi-Fi) | < 2s per image |
 | Server cold start | < 5s |
 | Docker image size | < 300MB |
@@ -416,7 +554,7 @@ docker compose up -d --build
 
 ---
 
-## 14. Appendix: ID Format
+## 15. Appendix: ID Format
 
 Card IDs use the format:
 
@@ -428,5 +566,5 @@ Example: `2026-05-24_230501_ab12`
 
 - `YYYY-MM-DD_HHmmss`: Capture start timestamp (local time).
 - `xxxx`: 4 random lowercase hex characters from `nanoid` or `crypto.randomUUID()`.
-- Total length: 21 characters.
+- Total length: 22 characters.
 - Filesystem-safe on all major OSes.
